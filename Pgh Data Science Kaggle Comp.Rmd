@@ -1,0 +1,525 @@
+---
+title: "Kaggle Comp"
+author: "Elijah Lovelace"
+date: "2/6/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(ggplot2)
+library(ggmap)
+library(maptools)
+library(ggthemes)
+library(rgeos)
+library(broom)
+library(dplyr)
+library(plyr)
+library(grid)
+library(gridExtra)
+library(reshape2)
+library(scales)
+library(reshape2)
+library(data.table)
+library(caret)
+library(dplyr)
+library(lubridate)
+library(gbm)
+library(xgboost)
+library(gganimate)
+library(e1071)
+library(rust)
+library(gifski)
+library(png)
+library(directlabels)
+library(ggrepel)
+library(transformr)
+library(tree)
+```
+
+```{r}
+train <- fread('train.csv')
+train <- train[complete.cases(train)]
+test <- fread('test.csv')
+```
+
+Looking over data
+```{r}
+head(train)
+train$Dates <- ymd_hms(train$Dates,tz=Sys.timezone())
+train$Year <- year(train$Dates)
+train$DayOfWeek <- factor(weekdays(train$Dates))
+train$Category <- factor(train$Category)
+train$PdDistrict <- factor(train$PdDistrict)
+train$month <- month(train$Dates)
+train$DayOfMonth <- day(train$Dates)
+train$Hour <- hour(train$Dates)
+train.x <- train[,c(1,4,5,8,9)]
+train.x$Dates <- ymd_hms(train.x$Dates,tz=Sys.timezone())
+train$Year <- year(train$Dates)
+train.x$Month <- month(train.x$Dates)
+train.x$HourofDay<- hour(train.x$Dates)
+train.x$DayofMonth <- day(train.x$Dates)
+train.x$Year <- year(train.x$Dates)
+train.x$PdDistrict <- factor(train.x$PdDistrict)
+train.x <- train.x[,-1]
+summary(train)
+head(train.x)
+head(test)
+
+```
+
+
+Summary of Data
+```{r}
+ggplot(data = train, aes(x = Category))+
+  geom_bar(stat="count")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 2))+
+  facet_wrap(~DayOfWeek)
+
+#This one is good!
+ggplot()+
+  geom_bar(data = train, aes( x=reorder(Category, table(Category)[Category]), fill = PdDistrict),stat="count")+
+  coord_flip()+
+  theme_bw()+
+  ylab('Count')+
+  xlab('Category')+
+  ggtitle('Frequency of Crime Categories by District')
+
+#trying to animate over time
+p<- ggplot()+
+  geom_bar(data = train[which(is.na(train$Year) == FALSE)], aes( x=reorder(Category, table(Category)[Category]), fill = PdDistrict),stat="count")+
+  coord_flip()+
+  ylab('Count')+
+  xlab('Category')+
+  ggtitle('Frequency of Crime Categories by District')
+
+p + transition_states(Year, transition_length = 1, state_length = 1) +
+  ease_aes('linear')
+
+#year by year
+p + transition_time(as.integer(Year)) +
+   labs(title = "Year: {frame_time}")+
+   ease_aes('cubic-in-out')
+#month by month
+p + transition_time(as.integer(month)) +
+   labs(title = "Month: {frame_time}")+
+   ease_aes('cubic-in-out')
+#hour by hour
+p + transition_time(as.integer(Hour)) +
+   labs(title = "Hour: {frame_time}")+
+   ease_aes('cubic-in-out')
+  
+
+#lineplot animation
+pl <- ggplot(data = train[which(is.na(train$Year) == FALSE)],aes( x=as.integer(Year), color = factor(Category)))+
+  geom_line(stat="count")+
+  theme_bw()+
+  theme(legend.position = "none")+
+  scale_x_continuous(breaks = unique(train$Year))+
+  geom_dl(aes(label = Category), method = "last.points", stat = 'count')
+
+pl+transition_reveal(Year)
+
+
+ggplot()+
+  geom_bar(data = train, aes(x = PdDistrict, fill = Category),stat="count")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 4))+
+  coord_flip()
+
+ggplot(data = train, aes(x = Category))+
+  geom_bar(stat="count")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 2))+
+  facet_wrap(~DayOfWeek)
+
+summary(train)
+plot(table(train$Category))
+```
+
+making maps
+```{r, echo=FALSE}
+# Define the URL of the zipped shapefile
+URL <- "https://github.com/simonkassel/Visualizing_SF_home_prices_R/raw/master/Data/SF_neighborhoods.zip"
+# Download the shapefile to your working directory and unzip it.
+download.file(URL, "SF_neighborhoods.zip")
+unzip("SF_neighborhoods.zip")
+# Read it into R as a spatial polygons data frame & plot
+neighb <- readShapePoly("SF_neighborhoods")
+plot(neighb)
+```
+
+```{r, echo = FALSE}
+# Define one that we will use for plots
+plotTheme <- function(base_size = 12) {
+  theme(
+    text = element_text( color = "black"),
+    plot.title = element_text(size = 18,colour = "black"),
+    plot.subtitle = element_text(face="italic"),
+    plot.caption = element_text(hjust=0),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),
+    panel.grid.major = element_line("grey80", size = 0.1),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey80", color = "white"),
+    strip.text = element_text(size=12),
+    axis.title = element_text(size=8),
+    axis.text = element_text(size=8),
+    axis.title.x = element_text(hjust=1),
+    axis.title.y = element_text(hjust=1),
+    plot.background = element_blank(),
+    legend.background = element_blank(),
+    legend.title = element_text(colour = "black", face = "italic"),
+    legend.text = element_text(colour = "black", face = "italic"))
+}
+ 
+# And another that we will use for maps
+mapTheme <- function(base_size = 12) {
+  theme(
+    text = element_text( color = "black"),
+    plot.title = element_text(size = 18,colour = "black"),
+    plot.subtitle=element_text(face="italic"),
+    plot.caption=element_text(hjust=0),
+    axis.ticks = element_blank(),
+    panel.background = element_blank(),
+    panel.grid.major = element_line("grey80", size = 0.1),
+    strip.text = element_text(size=12),
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "grey80", color = "white"),
+    plot.background = element_blank(),
+    legend.background = element_blank(),
+    legend.title = element_text(colour = "black", face = "italic"),
+    legend.text = element_text(colour = "black", face = "italic"))
+}
+ 
+# Define some palettes
+palette_9_colors <- c("#0DA3A0","#2999A9","#458FB2","#6285BB","#7E7CC4","#9A72CD","#B768D6","#D35EDF","#F055E9")
+palette_8_colors <- c("#0DA3A0","#2D97AA","#4D8CB4","#6E81BF","#8E76C9","#AF6BD4","#CF60DE","#F055E9")
+palette_7_colors <- c("#2D97AA","#4D8CB4","#6E81BF","#8E76C9","#AF6BD4","#CF60DE","#F055E9")
+palette_1_colors <- c("#0DA3A0")
+```
+
+
+```{r}
+# Define the bounding box
+bbox <- neighb@bbox
+ 
+# Manipulate these values slightly so that we get some padding on our basemap between the edge of the data and the edge of the map
+sf_bbox <- c(left = bbox[1, 1] - .01, bottom = bbox[2, 1] - .005, 
+             right = bbox[1, 2] + .01, top = bbox[2, 2] + .005)
+# Download the basemap
+basemap <- get_stamenmap(
+  bbox = sf_bbox,
+  zoom = 13,
+  maptype = "toner-lite")
+ 
+# Map it
+bmMap <- ggmap(basemap) + mapTheme()+
+  geom_point(aes(x=X, y =Y, color = DayOfWeek), alpha = 0.2, data = train, size = 0.05)+
+  theme(legend.position = "none")+
+  facet_wrap(~Category)
+bmMap
+
+bmMap2 <- ggmap(basemap) + mapTheme()+
+  geom_point(aes(x=X, y =Y, color = Category), alpha = 0.2, data = train, size = 0.05)+
+  theme(legend.position = "none")+
+  facet_grid(rows = vars(DayOfWeek))
+bmMap2
+```    
+
+
+
+
+
+Contour Map
+```{r}
+#larceny/theft
+# contours <- stat_density2d(
+# aes(x = X, y = Y, fill = ..level.., alpha=..level..),
+# size = 0.1, data = train[which(train$Category == 'LARCENY/THEFT')], n=200,
+# geom = "polygon")
+# 
+# ggmap(basemap, extent='device', legend="topleft") + contours +
+# scale_alpha_continuous(range=c(0.25,0.4), guide='none') +
+# scale_fill_gradient('Violent\nCrime\nDensity')+
+# ggtitle('Larceny/Theft in San Francisco')
+# 
+# #other offenses
+# contours <- stat_density2d(
+# aes(x = X, y = Y, fill = ..level.., alpha=..level..),
+# size = 0.1, data = train[which(train$Category == 'OTHER OFFENSES')], n=200,
+# geom = "polygon")
+# 
+# ggmap(basemap, extent='device', legend="topleft") + contours +
+# scale_alpha_continuous(range=c(0.25,0.4), guide='none') +
+# scale_fill_gradient('Violent\nCrime\nDensity')+
+# ggtitle('Other Offenses in San Francisco')
+# 
+# map <- vector(mode = "list", length = length(unique(train$Category)))
+# j = 1 
+for (i in unique(train$Category)){
+contours <- stat_density2d(
+aes(x = X, y = Y, fill = ..level.., alpha=..level..),
+size = 0.1, data = train[which(train$Category == i)], n=200,
+geom = "polygon")
+  
+
+map <- ggmap(basemap, extent='device', legend="topleft") + contours +
+  scale_alpha_continuous(range=c(0.25,0.4), guide='none') +
+  scale_fill_gradient(paste(i,'\nDensity'))+
+  ggtitle(paste(i, 'in San Francisco'))
+  
+
+print(map)
+}
+
+
+```  
+
+
+
+
+
+Looking into just Larceny and Theft (logistic)
+```{r}
+#creating dataset
+train.larceny <- train
+#adding dummy outcome
+train.larceny$larceny <- ifelse(train.larceny$Category == "LARCENY/THEFT",1,0)
+#cleaning data
+train.larceny$Dates <- ymd_hms(train.larceny$Dates,tz=Sys.timezone())
+train.larceny$Month <- month(train.larceny$Dates)
+train.larceny$HourofDay<- hour(train.larceny$Dates)
+train.larceny$DayofMonth <- day(train.larceny$Dates)
+
+
+logistic <- glm(data = train.larceny, larceny~factor(DayOfWeek)+HourofDay + factor(Month)+X+Y,family = 'binomial')
+summary(logistic)
+exp(logistic$coefficients)
+train.larceny$predict <- predict(logistic, newdata = train.larceny, type = "response")
+
+```
+
+Checking/Cleaning Training Data
+```{r}
+#checking variance of the features
+nzv <- nearZeroVar(train.x, saveMetrics= TRUE)
+#no zero var features
+
+#looking for correlated variables
+descrCor <- cor(train.x[,c(4,5,6,7,8)])
+
+#summary(descrCor[upper.tri(descrCor)])
+    #hist(descrCor[upper.tri(descrCor)])
+
+#dropping highly correlate variables
+highlyCorDescr <- findCorrelation(descrCor, cutoff = .75)
+#no highly correlated variables
+
+#pre processing data
+
+#removing NA
+train.x <- train.x[complete.cases(train.x), ]
+
+pp_df <- preProcess(train.x,
+                     method = c("center", "scale", "YeoJohnson"))
+
+transformed <- predict(pp_df, newdata = train.x) #878049
+
+#making sure test data has same columns 
+keep<- colnames(transformed)
+test$Dates <- ymd_hms(test$Dates,tz=Sys.timezone())
+test$Month <- month(test$Dates)
+test$HourofDay<- hour(test$Dates)
+test$DayofMonth <- day(test$Dates)
+test$DayOfWeek <-factor(test$DayOfWeek)
+test$PdDistrict <- factor(test$PdDistrict)
+test$Year <- year(test$Dates)
+test.2 <- test[,..keep] #581 x 128
+#test.2 <- test.2[complete.cases(test),]
+transformed_test <- predict(pp_df, newdata =test.2)
+transformed_test <- cbind.data.frame(Id = test$Id,transformed_test)
+transformed_w_category <- cbind.data.frame(Category = factor(train$Category),transformed)
+```
+
+Simple decision tree
+```{r}
+tree <- rpart(as.integer(Category) ~ DayOfWeek +factor(PdDistrict)+Year+month+DayOfMonth+Hour, data = train, method = 'class', control = rpart.control(minsplit = 200,cp=0))
+summary(tree) 
+
+plot(tree)
+text(tree, pretty= 0)
+```
+
+
+Running Model
+```{r}
+#setting up cross validation
+# fitControl <- trainControl(## 10-fold CV
+#                            method = "repeatedcv",
+#                            number = 5,
+#                            ## repeated ten times
+#                            repeats =1 )
+
+fitControl <- trainControl(## 10-fold CV
+                           method = "cv",
+                           number = 5)
+
+
+gbm <- train(x = transformed, y=as.numeric(train$Category[complete.cases(train)]), 
+                 method = 'gbm', 
+                 trControl = fitControl,
+                 verbose = FALSE)
+
+#GLM Model
+rpart.train<-function(train,test){
+  submission<-data.frame(Id=test$Id)
+  response<-data.frame(Cat=train$Category)
+  crime<-as.character(unique(train$Category))
+  crime<-sort(crime)
+  for (i in crime){
+    response[i]<- 0
+    response[i][response$Cat==i,]<- 1
+    fit<-glm(response[,i]~PdDistrict+X:Y+DayOfWeek+Year+HourofDay+Month+DayofMonth ,data=train, family = binomial)
+    pred <- predict(fit,test, type = "response")
+    submission[i]<-pred
+    print(paste0(ncol(submission)/length(crime)*100,'% completed'))
+    print(i)
+    print(summary(fit))
+  }
+  return(submission)
+}
+submission<-rpart.train(transformed_w_category,transformed_test)
+submission[is.na(submission)] <- 0
+rm(train, test, train.sub)
+write.csv(submission,'submission.csv',row.names=F, quote=F)
+```
+GBM Model
+```{r}
+#setting up cross validation
+# fitControl <- trainControl(## 10-fold CV
+#                            method = "repeatedcv",
+#                            number = 5,
+#                            ## repeated ten times
+#                            repeats =1 )
+
+fitControl <- trainControl(## 10-fold CV
+                           method = "cv",
+                           number = 5)
+
+
+gbm <- train(x = transformed, y=as.numeric(train$Category[complete.cases(train)]), 
+                 method = 'gbm', 
+                 trControl = fitControl,
+                 verbose = FALSE)
+
+#GBM Model
+rpart.train<-function(train,test){
+  submission<-data.frame(Id=test$Id)
+  response<-data.frame(Cat=train$Category)
+  crime<-as.character(unique(train$Category))
+  crime<-sort(crime)
+  for (i in crime){
+    response[i]<- 0
+    response[i][response$Cat==i,]<- 1
+    fit<-train(y = as.factor(response[,i]), x=train[,-1],
+               method = 'gbm',
+               trControl = fitControl,
+               verbose = FALSE)
+    pred <- predict(fit,test, type = "prb")
+    submission[i]<-pred
+    print(paste0(ncol(submission)/length(crime)*100,'% completed'))
+    print(i)
+    print(summary(fit))
+  }
+  return(submission)
+}
+submission<-rpart.train(transformed_w_category,transformed_test)
+submission[is.na(submission)] <- 0
+rm(train, test, train.sub)
+write.csv(submission,'submission.csv',row.names=F, quote=F)
+```
+
+Aggregating data
+```{r}
+by_year <- aggregate(data.frame(crime_count = train$DayOfWeek), 
+                         list(Category = train$Category, Year = train$Year), length)
+#graphs of mean/variance 
+ggplot()+
+  geom_bar(data = by_year, aes(x= factor(Category), y = crime_count),
+           stat = "summary", fun.y = "mean")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 4))+
+  ylab('Mean Crimes/year')+
+  xlab('Category')+
+  ggtitle("Mean Crimes per Year by Category")
+
+#looking into the variance 
+ggplot()+
+  geom_bar(data = by_year, aes(x= factor(Category), y = crime_count),
+           stat = "summary", fun.y = "var")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 4))+
+  ylab('Variance in Crimes/year')+
+  xlab('Category')+
+  ggtitle('Variance in Crimes per Year by Category')
+  
+
+by_month <- aggregate(data.frame(crime_count = train$DayOfWeek), 
+                         list(Category = train$Category, Month = train$month), length)
+#graphs of mean/variance 
+ggplot()+
+  geom_bar(data = by_month, aes(x= factor(Category), y = crime_count),
+           stat = "summary", fun.y = "mean")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 4))+
+  ylab('Mean Crimes/Month')+
+  xlab('Category')+
+  ggtitle("Mean Crimes per Month by Category")
+
+#looking into the variance 
+ggplot()+
+  geom_bar(data = by_month, aes(x= factor(Category), y = crime_count),
+           stat = "summary", fun.y = "var")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 4))+
+  ylab('Variance in Crimes/month')+
+  xlab('Category')+
+  ggtitle('Variance in Crimes per Month by Category')
+
+#by day
+by_day <- aggregate(data.frame(crime_count = train$DayOfWeek), 
+                         list(Category = train$Category, Date = date(train$Dates)), length)
+#graphs of mean/variance 
+ggplot()+
+  geom_bar(data = by_day, aes(x= factor(Category), y = crime_count),
+           stat = "summary", fun.y = "mean")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 4))+
+  ylab('Mean Crimes/Day')+
+  xlab('Category')+
+  ggtitle("Mean Crimes per Day by Category")
+
+#looking into the variance 
+ggplot()+
+  geom_bar(data = by_day, aes(x= factor(Category), y = crime_count),
+           stat = "summary", fun.y = "var")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 4))+
+  ylab('Variance in Crimes/day')+
+  xlab('Category')+
+  ggtitle('Variance in Crimes per Day by Category')
+  
+#by PdDistrict
+by_Pd <- aggregate(data.frame(crime_count = train$DayOfWeek), 
+                         list(Category = train$Category, PdDistrict = train$PdDistrict), length)
+ggplot(data = by_Pd)+
+  geom_bar(aes(x=Category,y=crime_count, color=PdDistrict), stat = 'identity')+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 4))
+```
+
