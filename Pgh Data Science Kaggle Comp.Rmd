@@ -98,6 +98,7 @@ p<- ggplot()+
 p + transition_states(Year, transition_length = 1, state_length = 1) +
   ease_aes('linear')
 
+#animating over time
 #year by year
 p + transition_time(as.integer(Year)) +
    labs(title = "Year: {frame_time}")+
@@ -149,59 +150,6 @@ neighb <- readShapePoly("SF_neighborhoods")
 plot(neighb)
 ```
 
-```{r, echo = FALSE}
-# Define one that we will use for plots
-plotTheme <- function(base_size = 12) {
-  theme(
-    text = element_text( color = "black"),
-    plot.title = element_text(size = 18,colour = "black"),
-    plot.subtitle = element_text(face="italic"),
-    plot.caption = element_text(hjust=0),
-    axis.ticks = element_blank(),
-    panel.background = element_blank(),
-    panel.grid.major = element_line("grey80", size = 0.1),
-    panel.grid.minor = element_blank(),
-    strip.background = element_rect(fill = "grey80", color = "white"),
-    strip.text = element_text(size=12),
-    axis.title = element_text(size=8),
-    axis.text = element_text(size=8),
-    axis.title.x = element_text(hjust=1),
-    axis.title.y = element_text(hjust=1),
-    plot.background = element_blank(),
-    legend.background = element_blank(),
-    legend.title = element_text(colour = "black", face = "italic"),
-    legend.text = element_text(colour = "black", face = "italic"))
-}
- 
-# And another that we will use for maps
-mapTheme <- function(base_size = 12) {
-  theme(
-    text = element_text( color = "black"),
-    plot.title = element_text(size = 18,colour = "black"),
-    plot.subtitle=element_text(face="italic"),
-    plot.caption=element_text(hjust=0),
-    axis.ticks = element_blank(),
-    panel.background = element_blank(),
-    panel.grid.major = element_line("grey80", size = 0.1),
-    strip.text = element_text(size=12),
-    axis.title = element_blank(),
-    axis.text = element_blank(),
-    axis.title.x = element_blank(),
-    axis.title.y = element_blank(),
-    panel.grid.minor = element_blank(),
-    strip.background = element_rect(fill = "grey80", color = "white"),
-    plot.background = element_blank(),
-    legend.background = element_blank(),
-    legend.title = element_text(colour = "black", face = "italic"),
-    legend.text = element_text(colour = "black", face = "italic"))
-}
- 
-# Define some palettes
-palette_9_colors <- c("#0DA3A0","#2999A9","#458FB2","#6285BB","#7E7CC4","#9A72CD","#B768D6","#D35EDF","#F055E9")
-palette_8_colors <- c("#0DA3A0","#2D97AA","#4D8CB4","#6E81BF","#8E76C9","#AF6BD4","#CF60DE","#F055E9")
-palette_7_colors <- c("#2D97AA","#4D8CB4","#6E81BF","#8E76C9","#AF6BD4","#CF60DE","#F055E9")
-palette_1_colors <- c("#0DA3A0")
-```
 
 
 ```{r}
@@ -346,105 +294,8 @@ transformed_test <- cbind.data.frame(Id = test$Id,transformed_test)
 transformed_w_category <- cbind.data.frame(Category = factor(train$Category),transformed)
 ```
 
-Simple decision tree
-```{r}
-tree <- rpart(as.integer(Category) ~ DayOfWeek +factor(PdDistrict)+Year+month+DayOfMonth+Hour, data = train, method = 'class', control = rpart.control(minsplit = 200,cp=0))
-summary(tree) 
 
-plot(tree)
-text(tree, pretty= 0)
-```
-
-
-Running Model
-```{r}
-#setting up cross validation
-# fitControl <- trainControl(## 10-fold CV
-#                            method = "repeatedcv",
-#                            number = 5,
-#                            ## repeated ten times
-#                            repeats =1 )
-
-fitControl <- trainControl(## 10-fold CV
-                           method = "cv",
-                           number = 5)
-
-
-gbm <- train(x = transformed, y=as.numeric(train$Category[complete.cases(train)]), 
-                 method = 'gbm', 
-                 trControl = fitControl,
-                 verbose = FALSE)
-
-#GLM Model
-rpart.train<-function(train,test){
-  submission<-data.frame(Id=test$Id)
-  response<-data.frame(Cat=train$Category)
-  crime<-as.character(unique(train$Category))
-  crime<-sort(crime)
-  for (i in crime){
-    response[i]<- 0
-    response[i][response$Cat==i,]<- 1
-    fit<-glm(response[,i]~PdDistrict+X:Y+DayOfWeek+Year+HourofDay+Month+DayofMonth ,data=train, family = binomial)
-    pred <- predict(fit,test, type = "response")
-    submission[i]<-pred
-    print(paste0(ncol(submission)/length(crime)*100,'% completed'))
-    print(i)
-    print(summary(fit))
-  }
-  return(submission)
-}
-submission<-rpart.train(transformed_w_category,transformed_test)
-submission[is.na(submission)] <- 0
-rm(train, test, train.sub)
-write.csv(submission,'submission.csv',row.names=F, quote=F)
-```
-GBM Model
-```{r}
-#setting up cross validation
-# fitControl <- trainControl(## 10-fold CV
-#                            method = "repeatedcv",
-#                            number = 5,
-#                            ## repeated ten times
-#                            repeats =1 )
-
-fitControl <- trainControl(## 10-fold CV
-                           method = "cv",
-                           number = 5)
-
-
-gbm <- train(x = transformed, y=as.numeric(train$Category[complete.cases(train)]), 
-                 method = 'gbm', 
-                 trControl = fitControl,
-                 verbose = FALSE)
-
-#GBM Model
-rpart.train<-function(train,test){
-  submission<-data.frame(Id=test$Id)
-  response<-data.frame(Cat=train$Category)
-  crime<-as.character(unique(train$Category))
-  crime<-sort(crime)
-  for (i in crime){
-    response[i]<- 0
-    response[i][response$Cat==i,]<- 1
-    fit<-train(y = as.factor(response[,i]), x=train[,-1],
-               method = 'gbm',
-               trControl = fitControl,
-               verbose = FALSE)
-    pred <- predict(fit,test, type = "prb")
-    submission[i]<-pred
-    print(paste0(ncol(submission)/length(crime)*100,'% completed'))
-    print(i)
-    print(summary(fit))
-  }
-  return(submission)
-}
-submission<-rpart.train(transformed_w_category,transformed_test)
-submission[is.na(submission)] <- 0
-rm(train, test, train.sub)
-write.csv(submission,'submission.csv',row.names=F, quote=F)
-```
-
-Aggregating data
+Aggregating data for more visuals
 ```{r}
 by_year <- aggregate(data.frame(crime_count = train$DayOfWeek), 
                          list(Category = train$Category, Year = train$Year), length)
@@ -523,3 +374,77 @@ ggplot(data = by_Pd)+
   theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 4))
 ```
 
+
+Running Models
+```{r}
+
+
+#GLM Model
+rpart.train<-function(train,test){
+  submission<-data.frame(Id=test$Id)
+  response<-data.frame(Cat=train$Category)
+  crime<-as.character(unique(train$Category))
+  crime<-sort(crime)
+  for (i in crime){
+    response[i]<- 0
+    response[i][response$Cat==i,]<- 1
+    fit<-glm(response[,i]~PdDistrict+X:Y+DayOfWeek+Year+HourofDay+Month+DayofMonth ,data=train, family = binomial)
+    pred <- predict(fit,test, type = "response")
+    submission[i]<-pred
+    print(paste0(ncol(submission)/length(crime)*100,'% completed'))
+    print(i)
+    print(summary(fit))
+  }
+  return(submission)
+}
+submission<-rpart.train(transformed_w_category,transformed_test)
+submission[is.na(submission)] <- 0
+rm(train, test, train.sub)
+write.csv(submission,'submission.csv',row.names=F, quote=F)
+```
+
+GBM Model
+```{r}
+#setting up cross validation
+# fitControl <- trainControl(## 10-fold CV
+#                            method = "repeatedcv",
+#                            number = 5,
+#                            ## repeated ten times
+#                            repeats =1 )
+
+fitControl <- trainControl(## 10-fold CV
+                           method = "cv",
+                           number = 5)
+
+
+gbm <- train(x = transformed, y=as.numeric(train$Category[complete.cases(train)]), 
+                 method = 'gbm', 
+                 trControl = fitControl,
+                 verbose = FALSE)
+
+#GBM Model
+rpart.train<-function(train,test){
+  submission<-data.frame(Id=test$Id)
+  response<-data.frame(Cat=train$Category)
+  crime<-as.character(unique(train$Category))
+  crime<-sort(crime)
+  for (i in crime){
+    response[i]<- 0
+    response[i][response$Cat==i,]<- 1
+    fit<-train(y = as.factor(response[,i]), x=train[,-1],
+               method = 'gbm',
+               trControl = fitControl,
+               verbose = FALSE)
+    pred <- predict(fit,test, type = "prb")
+    submission[i]<-pred
+    print(paste0(ncol(submission)/length(crime)*100,'% completed'))
+    print(i)
+    print(summary(fit))
+  }
+  return(submission)
+}
+submission<-rpart.train(transformed_w_category,transformed_test)
+submission[is.na(submission)] <- 0
+rm(train, test, train.sub)
+write.csv(submission,'submission.csv',row.names=F, quote=F)
+```
