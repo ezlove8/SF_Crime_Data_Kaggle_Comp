@@ -3,6 +3,5 @@ Code used for visualizing and modeling San Francisco Crime data from Kaggle comp
 
 Data was taken from https://www.kaggle.com/c/sf-crime.  
 
--File xgboost.R contains script with data preparation and modeling using gradient boosted model.  
-
+-File xgboost.R contains script with data preparation and modeling using gradient boosted model. /n
 -File PGH_Data_Science_Kaggle_Comp.Rmd is a markdown containing code for data cleanup, visualizations and a simple logistic regression model. 
