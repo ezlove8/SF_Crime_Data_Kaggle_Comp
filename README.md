@@ -6,3 +6,5 @@ Data was taken from https://www.kaggle.com/c/sf-crime.
 -File xgboost.R contains script with data preparation and modeling using gradient boosted model. 
 
 -File PGH_Data_Science_Kaggle_Comp.Rmd is a markdown containing code for data cleanup, visualizations and a simple logistic regression model. 
+
+-File Final Pres.pptx.zip contains powerpoint of final presentation: note- animated plots require slides to be played in slideshow mode 
